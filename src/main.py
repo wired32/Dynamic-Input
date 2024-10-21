@@ -1,7 +1,6 @@
 import msvcrt
 from time import time as timestamp
 from rich import print
-from requests import post
 from typing import Callable, Optional
 from threading import Thread
 
@@ -30,11 +29,14 @@ class DynamicInput:
             s (str): The completion string to display.
             shade (str): The shade string to style the completion output.
         """
+        if len(self.buffer) > self.bufferLen:
+            return # Buffer change, completion might glitch so return early
+
         from sys import stdout
         stdout.write("\033[s")  # Save cursor position
         stdout.write("\033[K")  # Clear the line
         stdout.flush()
-        
+
         print(f"[{shade}]{s}", end='', flush=True)  # Print completion
 
         stdout.write("\033[u")  # Restore cursor position
@@ -62,8 +64,8 @@ class DynamicInput:
         self.fetchInProgress = False
 
     def input(self, prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n',
-              allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
-              indent: int = 4) -> str:
+            allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
+            indent: int = 4) -> str:
         """Gets a line of input from the user and returns the input string.
 
         The user can use the tab key for autocomplete predictions, backspace to delete characters,
@@ -81,9 +83,10 @@ class DynamicInput:
         Returns:
             str: The user input string.
         """
+
         ts = timestamp()
         called = False
-        buffer = []
+        self.buffer = []
 
         if call_to is None:
             raise ValueError("Please provide a call_to function.")
@@ -93,27 +96,26 @@ class DynamicInput:
 
         while True:
             cts = timestamp()
+            
+            # Check if enough time has passed since the last character was typed
             if cts - ts > time_buffer and called:
-                complete_thread = Thread(target=self._process_completion, args=(buffer, shade, call_to))
+                complete_thread = Thread(target=self._process_completion, args=(self.buffer, shade, call_to))
                 complete_thread.start()
-                called = False
+                called = False  # Reset called after processing completion
 
             if msvcrt.kbhit():
-                if not called:
-                    called = True
-
-                key = msvcrt.getwch()
+                key = msvcrt.getch().decode('utf-8')
 
                 if key == '\b':  # Handle backspace
-                    if buffer:
+                    if self.buffer:
                         from sys import stdout
-                        buffer.pop()
+                        self.buffer.pop()
                         stdout.write('\x1b[D\x1b[P')  # Move cursor back and replace character
                         stdout.flush()
+                        called = True  # Indicate input has changed
                 elif key == '\r':  # Handle enter key
                     from sys import stdout
-                    if not allow_empty_input and not buffer:
-                        called = False
+                    if not allow_empty_input and not self.buffer:
                         continue
                     self.exit = True
                     stdout.write("\033[K")  # Clear line
@@ -122,34 +124,39 @@ class DynamicInput:
                 elif key == '\t':  # Handle tab key
                     if self.completion:
                         print(self.completion, end='')  # Show completion
-                        called = False
+                        self.buffer.extend(self.completion)  # Append the completion to the buffer
+                        called = False  # Reset called since we displayed completion
                     else:
                         print(" " * indent, end='')  # Print spaces if no completion
                 else:  # Handle regular character input
-                    buffer.append(key)
+                    self.buffer.append(key)
                     print(f"{key}", end='', flush=True)
-                    if len(buffer) - self.bufferLen > self.completionLen:
-                        self.completion = ""  # Clear completion if new input exceeds previous
+                    called = True  # Indicate input has changed
 
-                ts = cts
+                ts = cts  # Update the timestamp
 
-        return ''.join(buffer)
+        return ''.join(self.buffer)
+
 
 if __name__ == "__main__":
     def call_to_example(s: str) -> str:
-        """Example completion function that returns suggestions based on user input.
+        """Auto-completion function that returns the remaining part of the best matching word based on user input.
 
         Args:
             s (str): The current input string.
 
         Returns:
-            str: The suggested completion string.
+            str: The remaining part of the completed string or an empty string if no match is found.
         """
-        from difflib import get_close_matches  # type: ignore
         choices = ["apple", "apricot", "banana", "blueberry", "blackberry", "orange"]
-        approximated_string = get_close_matches(s, choices, n=1, cutoff=0.5)
         
-        return approximated_string[0] if approximated_string else ""
+        s = s.split(' ')[::-1][0] # Gets the last word in the buffer
+        for choice in choices:
+            if choice.startswith(s):
+                return choice[len(s):]  # Return the remaining part of the string
+        
+        return ""  # Return an empty string if no match is found
 
     session = DynamicInput()
-    session.input("cooltest> ", call_to=call_to_example)
+    answer = session.input("cooltest> ", call_to=call_to_example)
+    print(f"\nAnswer: {answer}")
