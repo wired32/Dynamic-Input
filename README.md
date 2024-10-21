@@ -6,12 +6,12 @@ Welcome to the **Dynamic Input** library! This Python script enhances the user i
 
 - **Auto-completion**: Suggests completions as you type! ✨
 - **Customizable Prompt**: Change the prompt message to fit your needs! 💬
-- **Real-time Input Handling**: Responds to key presses in real-time! ⏱️
+- **Real-time Input Handling**: Responds to writing in real-time! ⏱️
 - **Flexible API**: Easily integrate with your functions for completion logic! 🔌
 
 ## 🛠️ Installation
 
-To use this script, ensure you have Python installed on your machine. This script is compatible with Windows environments.
+To use this script, ensure you have Python installed on your machine. This script is only compatible with Windows environments yet (might come to linux soon!).
 
 1. Clone the repository or download the script.
 2. Make sure you have the `rich` library installed. You can install it using pip:
