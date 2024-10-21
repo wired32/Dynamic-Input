@@ -1,8 +1,8 @@
 import msvcrt
 from time import time as timestamp
-from rich import print
 from typing import Callable, Optional
 from threading import Thread
+from packets import CompletionPacket
 
 class DynamicInput:
     def __init__(self):
@@ -16,28 +16,29 @@ class DynamicInput:
             exit (bool): A flag that indicates whether the user has pressed enter.
             fetchInProgress (bool): A flag that indicates whether a fetch for completion is in progress.
         """
-        self.completion = ""
+        self.completion = CompletionPacket('', '', 0) # Empty packet
         self.bufferLen = 0
         self.completionLen = 0
         self.exit = False
         self.fetchInProgress = False
 
-    def complete(self, s: str, shade: str) -> None:
+    def complete(self, s: CompletionPacket) -> None:
         """Prints the completion string to the console with the given shade.
 
         Args:
             s (str): The completion string to display.
             shade (str): The shade string to style the completion output.
         """
-        if len(self.buffer) > self.bufferLen:
+        if len(self.buffer) > s.bufferlenght:
             return # Buffer change, completion might glitch so return early
 
         from sys import stdout
+        from rich import print
         stdout.write("\033[s")  # Save cursor position
         stdout.write("\033[K")  # Clear the line
         stdout.flush()
 
-        print(f"[{shade}]{s}", end='', flush=True)  # Print completion
+        print(f"[{s.shade}]{s.content}", end='', flush=True)  # Print completion
 
         stdout.write("\033[u")  # Restore cursor position
         stdout.flush()
@@ -55,12 +56,10 @@ class DynamicInput:
             return
         self.fetchInProgress = True
 
-        self.bufferLen = len(buffer)
-        self.completion = call_to(''.join(buffer))  # Call the function to get completion
-        self.completionLen = len(self.completion)
+        self.completion = CompletionPacket(call_to(''.join(buffer)), shade, len(buffer))
 
         if not self.exit:
-            self.complete(self.completion, shade)  # Display the completion
+            self.complete(self.completion)
         self.fetchInProgress = False
 
     def input(self, prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n',
@@ -83,6 +82,7 @@ class DynamicInput:
         Returns:
             str: The user input string.
         """
+        from rich import print
 
         ts = timestamp()
         called = False
@@ -122,9 +122,9 @@ class DynamicInput:
                     print(end=end)
                     break
                 elif key == '\t':  # Handle tab key
-                    if self.completion:
-                        print(self.completion, end='')  # Show completion
-                        self.buffer.extend(self.completion)  # Append the completion to the buffer
+                    if self.completion.content:
+                        print(self.completion.content, end='')  # Show completion
+                        self.buffer.extend(self.completion.content)  # Append the completion to the buffer
                         called = False  # Reset called since we displayed completion
                     else:
                         print(" " * indent, end='')  # Print spaces if no completion
@@ -136,7 +136,6 @@ class DynamicInput:
                 ts = cts  # Update the timestamp
 
         return ''.join(self.buffer)
-
 
 if __name__ == "__main__":
     def call_to_example(s: str) -> str:
