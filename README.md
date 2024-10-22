@@ -27,7 +27,7 @@ To use this script, ensure you have Python installed on your machine. This scrip
 Here's a quick guide on how to use the **Dynamic Input** class:
 
 ```python
-from dynamic_input import DynamicInput
+from dynamicio import DynamicInput
 
 # Example completion function
 def call_to_example(s: str) -> str:
