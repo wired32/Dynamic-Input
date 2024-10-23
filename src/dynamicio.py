@@ -1,3 +1,5 @@
+"""A module that adds flexibility to user input."""
+
 import msvcrt
 from time import time as timestamp
 from typing import Callable, Optional
@@ -6,7 +8,8 @@ from packets import CompletionPacket, InputConfigsPacket
 from sys import stdout
 
 class DynamicInput:
-    def __init__(self):
+    """A class that adds flexibility to user input"""
+    def __init__(self) -> None:
         """
         Initializes the DynamicInput class.
 
@@ -27,12 +30,12 @@ class DynamicInput:
             '\b': self._handle_backspace
         }
 
-    def _hideCursor(self):
+    def _hideCursor(self) -> None:
         """Hides the cursor in the console."""
         stdout.write("\033[?25l")
         stdout.flush()
 
-    def _showCursor(self):
+    def _showCursor(self) -> None:
         """Shows the cursor in the console."""
         stdout.write("\033[?25h")
         stdout.flush()
@@ -84,7 +87,7 @@ class DynamicInput:
 
     def input(self, prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n',
               allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
-              indent: int = 4, config_bind: str = None, raw_call: bool = False, output_bind: bool = True) -> str:
+              indent: int = 4, config_bind: str = None, raw_call: bool = False, output_bind: bool = True, inactivity_trigger: bool = True) -> str:
         """
         Receives input from the user, supporting autocompletion and key handlers.
 
@@ -99,6 +102,7 @@ class DynamicInput:
             config_bind (str, optional): A keybind for triggering the autocompletion logic on certain keys.
             raw_call (bool, optional): If True, the call_to function is triggered immediately without autocompletion display. Default is False.
             output_bind (bool, optional): If True, the bound key is shown in the output buffer. Default is True.
+            inactivity_trigger (bool, optional): If True, the call logic is triggered when the user is inactive for a certain amount of time. Defaults to True
 
         Returns:
             str: The final input string after the user presses enter.
@@ -114,9 +118,6 @@ class DynamicInput:
         if config_bind is not None and len(config_bind) > 1:
             raise KeyError("config_bind must be a single character.")
 
-        if call_to is None:
-            raise ValueError("Please provide a call_to function for autocompletion.")
-
         # Display the prompt
         if prompt is not None:
             print(prompt, end='', flush=True)
@@ -125,7 +126,7 @@ class DynamicInput:
             cts = timestamp()
 
             # Check if enough time has passed for autocompletion
-            if cts - ts > time_buffer and called and config_bind is None:
+            if cts - ts > time_buffer and called and inactivity_trigger and call_to is not None:
                 if raw_call:
                     Thread(target=call_to, args=(''.join(self.buffer),)).start()
                 else:
@@ -136,7 +137,7 @@ class DynamicInput:
                 key = msvcrt.getch().decode('utf-8')
 
                 # Handle key bound to config_bind
-                if key == config_bind and not raw_call:
+                if key == config_bind and not raw_call and call_to is not None:
                     if output_bind:
                         self.buffer.append(key)
                         print(key, end='', flush=True)
@@ -147,7 +148,7 @@ class DynamicInput:
                 elif key == config_bind and raw_call:
                     if output_bind:
                         self.buffer.append(key)
-                        print(key, end='', flush=True)
+                        print(key, end='')
                     Thread(target=call_to, args=(''.join(self.buffer),)).start()
                     ts = cts
                     continue
@@ -169,7 +170,7 @@ class DynamicInput:
 
         return ''.join(self.buffer)
 
-    def _handle_enter(self, args: InputConfigsPacket):
+    def _handle_enter(self, args: InputConfigsPacket) -> str:
         """
         Handles the enter key press to finalize the input.
 
@@ -189,7 +190,7 @@ class DynamicInput:
         print(end=args.end)
         return 'EXIT'
 
-    def _handle_backspace(self, args: InputConfigsPacket):
+    def _handle_backspace(self, args: InputConfigsPacket) -> bool:
         """
         Handles the backspace key to remove the last character in the input.
 
@@ -205,7 +206,7 @@ class DynamicInput:
             self.buffer.pop()  # Remove the last character from the buffer
             return True
 
-    def _handle_tab(self, args: InputConfigsPacket):
+    def _handle_tab(self, args: InputConfigsPacket) -> bool:
         """
         Handles the tab key for autocompletion or inserts spaces if no completion is available.
 
@@ -222,7 +223,7 @@ class DynamicInput:
             print(" " * args.indent, end='', flush=True)  # Insert spaces if no completion
         return False
 
-    def _handle_regular(self, args: InputConfigsPacket):
+    def _handle_regular(self, args: InputConfigsPacket) -> bool:
         """
         Handles regular alphanumeric characters during input.
 
@@ -303,3 +304,18 @@ class DynamicInput:
             raise ValueError("Cannot edit with an empty string.")
 
         Thread(target=self._edit, args=(returnRange, new_text)).start()
+
+def input(prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n', raw_call: bool = False, inactivity_trigger: bool = True) -> str:
+    """
+    A simple wrapper around DynamicInput.input() to provide a more Pythonic experience.
+
+    Args:
+        prompt (str, optional): The string prompt shown to the user before input.
+        call_to (Callable[[str], str], optional): The function to call after a trigger.
+        end (str, optional): The character to print after the input. Default is newline.
+        raw_call (bool, optional): If True, the call logic is triggered immediately without autocompletion display. Default is False.
+
+    Returns:
+        str: The final input string after the user presses enter.
+    """
+    return DynamicInput().input(prompt, call_to, end=end, raw_call=raw_call, inactivity_trigger=inactivity_trigger)
