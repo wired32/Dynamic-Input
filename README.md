@@ -1,13 +1,17 @@
-# 🌟 Dynamic Input for Python 🐍
+# 🚀 Dynamic Inputs for Python
 
-Welcome to the **Dynamic Input** library! This Python script enhances the user input experience in console applications, providing features like auto-completion, customizable prompts, and more! 🚀
+Welcome to the **Dynamic Input** library! This Python library enhances the user input experience in console applications and the control that developers have over the input, providing **Real time wide control** of the input!
 
 ## 📦 Features
 
-- **Auto-completion**: Suggests completions as you type! ✨
-- **Customizable Prompt**: Change the prompt message to fit your needs! 💬
-- **Real-time Input Handling**: Responds to writing in real-time! ⏱️
-- **Flexible API**: Easily integrate with your functions for completion logic! 🔌
+- **Flexibility**: Dynamic Inputs allow you to control the user input without waiting for them to finish!
+   - This allows you to create dynamic auto completers, grammar correctors, and more!
+   - It use threads to guarantee that the user's experience won't be interrupted!
+   - Instead of the single parameter that the conventional input function accepts, you can actually customize anything with this new input! This includes:
+      - end: What will be displayed after the input, this defaults to '\n' like python does but you can set it as an empty string or a space to stay on the same line!
+      - allow_empty_input: If false, will block the input flow to make sure that the user will not be able to enter an empty string, set it as True if you don't want this functionality.
+      - And more!
+   
 
 ## 🛠️ Installation
 
@@ -48,16 +52,12 @@ print(f"\nAnswer: {answer}")
 
 - **`DynamicInput` class**: Main class to handle dynamic input.
 - **`input` method**: Prompts the user for input and allows for auto-completion based on the provided function.
+- **`edit` method**: This will edit the current input content, useful to apply at the call_to function.
 - **Keybindings**:
   - **Enter**: Submit the input.
   - **Tab**: Autocomplete the current word.
   - **Backspace**: Delete the last character.
-
-## 📜 Function Reference
-
-- **`complete(s: str, shade: str)`**: Displays the completion string.
-- **`_process_completion(buffer: list, shade: str, call_to: Optional[Callable[[str], str]])`**: Processes the completion string in a separate thread.
-- **`input(prompt: str, call_to: Optional[Callable[[str], str]], ...)`**: Gets user input with auto-completion functionality.
+  - **Custom Keybind**: Triggers the given functionm
 
 ## 🌐 Example Output
 
