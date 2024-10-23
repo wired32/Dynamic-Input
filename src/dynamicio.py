@@ -3,6 +3,7 @@ from time import time as timestamp
 from typing import Callable, Optional
 from threading import Thread
 from packets import CompletionPacket, InputConfigsPacket
+from sys import stdout
 
 class DynamicInput:
     def __init__(self):
@@ -10,64 +11,71 @@ class DynamicInput:
         Initializes the DynamicInput class.
 
         Attributes:
-            completion (str): The completion string that is written to the console.
-            bufferLen (int): The length of the current buffer.
-            completionLen (int): The length of the completion string.
-            exit (bool): A flag that indicates whether the user has pressed enter.
+            completion (CompletionPacket): The packet containing the completion string and its metadata.
+            exit (bool): A flag that indicates whether the user has pressed enter to end input.
             fetchInProgress (bool): A flag that indicates whether a fetch for completion is in progress.
+            handlers (dict): A dictionary that maps keys (like tab or enter) to their handler methods.
         """
-        self.completion = CompletionPacket('', '', 0) # Empty packet
-        self.completionLen = 0
+        self.completion = CompletionPacket('', '', 0)  # Initialize with an empty packet
         self.exit = False
         self.fetchInProgress = False
 
+        # Key handlers for tab, enter, and backspace
         self.handlers = {
             '\t': self._handle_tab,
             '\r': self._handle_enter,
             '\b': self._handle_backspace
         }
 
+    def _hideCursor(self):
+        """Hides the cursor in the console."""
+        stdout.write("\033[?25l")
+        stdout.flush()
+
+    def _showCursor(self):
+        """Shows the cursor in the console."""
+        stdout.write("\033[?25h")
+        stdout.flush()
+
     def complete(self, s: CompletionPacket) -> None:
-        """Prints the completion string to the console with the given shade.
+        """
+        Displays the autocompletion suggestion on the console.
 
         Args:
-            s (str): The completion string to display.
-            shade (str): The shade string to style the completion output.
+            s (CompletionPacket): The packet containing the completion string to display.
         """
         if len(self.buffer) > s.bufferlenght:
-            return # Buffer change, completion might glitch so return early
+            return  # If the buffer length has changed, abort to avoid glitches.
 
-        from sys import stdout
         from rich import print
         stdout.write("\033[s")  # Save cursor position
         stdout.write("\033[K")  # Clear the line
         stdout.flush()
 
-        # Hide the cursor for UX
-        stdout.write("\033[?25l")
+        self._hideCursor()  # Hide cursor for smoother changes
+
+        # Print the completion content using rich colors
+        print(f"[{s.shade}]{s.content}", end='', flush=True)
+
+        stdout.write("\033[u")  # Restore cursor position
         stdout.flush()
 
-        print(f"[{s.shade}]{s.content}", end='', flush=True)  # Print completion
-
-        stdout.write("\033[u")    # Restore cursor position
-        stdout.flush()
-        
-        stdout.write("\033[?25h") # Show the cursor again
-        stdout.flush()
+        self._showCursor()  # Show the cursor again
 
     def _process_completion(self, buffer: list, shade: str, call_to: Optional[Callable[[str], str]] = None) -> None:
         """
-        Processes the completion string in a separate thread.
+        Processes the autocompletion in a separate thread.
 
         Args:
-            buffer (list): The list of characters that have been typed so far.
-            shade (str): The shade string for completion.
-            call_to (Optional[Callable[[str], str]], optional): The function to call for getting the completion string. Defaults to None.
+            buffer (list): The characters typed so far.
+            shade (str): The color shade for displaying the completion.
+            call_to (Optional[Callable[[str], str]], optional): The function to call to get the completion string.
         """
         if self.fetchInProgress:
             return
         self.fetchInProgress = True
 
+        # Get the completion from the callable
         self.completion = CompletionPacket(call_to(''.join(buffer)), shade, len(buffer))
 
         if not self.exit:
@@ -75,77 +83,107 @@ class DynamicInput:
         self.fetchInProgress = False
 
     def input(self, prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n',
-            allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
-            indent: int = 4) -> str:
-        """Gets a line of input from the user and returns the input string.
-
-        The user can use the tab key for autocomplete predictions, backspace to delete characters,
-        and enter to submit the input.
+              allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
+              indent: int = 4, config_bind: str = None, raw_call: bool = False, output_bind: bool = True) -> str:
+        """
+        Receives input from the user, supporting autocompletion and key handlers.
 
         Args:
-            prompt (str): The prompt string to display before the input.
-            end (str): The string to print after the input.
-            allow_empty_input (bool): Flag to allow submitting an empty string.
-            shade (str): The shade string for the completion output. (uses rich standart colors)
-            time_buffer (float): Time in seconds to wait before fetching completion after the last character typed.
-            call_to (Callable[[str], str]): The function to call for the prediction string.
-            indent (int): The number of spaces added if no completion is available.
+            prompt (str, optional): The string prompt shown to the user before input.
+            call_to (Callable[[str], str], optional): The function to call for the autocompletion logic.
+            end (str, optional): The character to print after the input. Default is newline.
+            allow_empty_input (bool, optional): If False, prevents submitting an empty input. Default is True.
+            shade (str, optional): The color shade for autocompletion. Uses rich color codes. Default is 'grey30'.
+            time_buffer (float, optional): Time in seconds before fetching autocompletion after typing. Default is 0.5 seconds.
+            indent (int, optional): The number of spaces inserted for indentation when no completion is available.
+            config_bind (str, optional): A keybind for triggering the autocompletion logic on certain keys.
+            raw_call (bool, optional): If True, the call_to function is triggered immediately without autocompletion display. Default is False.
+            output_bind (bool, optional): If True, the bound key is shown in the output buffer. Default is True.
 
         Returns:
-            str: The user input string.
+            str: The final input string after the user presses enter.
         """
         from rich import print
 
         ts = timestamp()
         called = False
+        self.exit = False # Reset the exit flag
         self.buffer = []
 
-        if call_to is None:
-            raise ValueError("Please provide a call_to function.")
+        # Ensure a single character is bound if config_bind is provided
+        if config_bind is not None and len(config_bind) > 1:
+            raise KeyError("config_bind must be a single character.")
 
+        if call_to is None:
+            raise ValueError("Please provide a call_to function for autocompletion.")
+
+        # Display the prompt
         if prompt is not None:
             print(prompt, end='', flush=True)
 
         while True:
             cts = timestamp()
-            
-            # Check if enough time has passed since the last character was typed
-            if cts - ts > time_buffer and called:
-                complete_thread = Thread(target=self._process_completion, args=(self.buffer, shade, call_to))
-                complete_thread.start()
-                called = False  # Reset called after processing completion
+
+            # Check if enough time has passed for autocompletion
+            if cts - ts > time_buffer and called and config_bind is None:
+                if raw_call:
+                    Thread(target=call_to, args=(''.join(self.buffer),)).start()
+                else:
+                    Thread(target=self._process_completion, args=(self.buffer, shade, call_to)).start()
+                called = False
 
             if msvcrt.kbhit():
                 key = msvcrt.getch().decode('utf-8')
 
+                # Handle key bound to config_bind
+                if key == config_bind and not raw_call:
+                    if output_bind:
+                        self.buffer.append(key)
+                        print(key, end='', flush=True)
+
+                    Thread(target=self._process_completion, args=(self.buffer, shade, call_to)).start()
+                    ts = cts
+                    continue
+                elif key == config_bind and raw_call:
+                    if output_bind:
+                        self.buffer.append(key)
+                        print(key, end='', flush=True)
+                    Thread(target=call_to, args=(''.join(self.buffer),)).start()
+                    ts = cts
+                    continue
+
+                # Handle special keys like enter, tab, or backspace
                 if key in self.handlers:
                     handler = self.handlers.get(key)
-                    response = handler(InputConfigsPacket(buffer=self.buffer, indent=indent, end=end, allow_empty_input=allow_empty_input, key=key))
-                    if response == 'EXIT': break # End of input
-                    elif response == 'CONTINUE': continue # Ignore input
+                    response = handler(InputConfigsPacket(buffer=self.buffer, indent=indent, end=end,
+                                                          allow_empty_input=allow_empty_input, key=key))
+                    if response == 'EXIT':
+                        break
+                    elif response == 'CONTINUE':
+                        continue
                     called = response
                 else:
                     called = self._handle_regular(InputConfigsPacket(key=key))
 
-                ts = cts  # Update the timestamp
+                ts = cts
 
         return ''.join(self.buffer)
-    
+
     def _handle_enter(self, args: InputConfigsPacket):
-        """Handles the enter key press event to end the input and print a newline.
-        
-        Args:
-            args (InputConfigsPacket): Contains the input configuration settings, including the buffer, indentation level, 
-                                    end character, allow_empty_input flag, and the key pressed.
-        
-        Returns:
-            str: 'EXIT' to indicate that the input has ended, 'CONTINUE' if the input should continue.
         """
-        from sys import stdout
+        Handles the enter key press to finalize the input.
+
+        Args:
+            args (InputConfigsPacket): The input configuration packet.
+
+        Returns:
+            str: 'EXIT' to signal input completion, 'CONTINUE' if input should continue.
+        """
         if not args.allow_empty_input and not self.buffer:
-            return 'CONTINUE' # Code to sinalize end of input
+            return 'CONTINUE'  # Prevent empty submission if not allowed
         self.exit = True
-        stdout.write("\033[K")  # Clear any completion
+
+        stdout.write("\033[K")  # Clear completion
         stdout.flush()
 
         print(end=args.end)
@@ -153,73 +191,115 @@ class DynamicInput:
 
     def _handle_backspace(self, args: InputConfigsPacket):
         """
-        Handles the backspace key press event to delete the last character in the buffer and move the cursor back.
+        Handles the backspace key to remove the last character in the input.
 
         Args:
-            args (InputConfigsPacket): Contains the input configuration settings, including the buffer, indentation level, 
-                                    end character, allow_empty_input flag, and the key pressed.
+            args (InputConfigsPacket): The input configuration packet.
 
         Returns:
-            bool: True if the input has changed, False otherwise.
+            bool: True if the buffer changed, otherwise False.
         """
         if self.buffer:
-            from sys import stdout
-            self.buffer.pop()
-            stdout.write('\x1b[D\x1b[P')  # Move cursor back and replace character
+            stdout.write('\x1b[D\x1b[P')  # Move cursor back and delete the character
             stdout.flush()
-            return True  # Indicate input has changed
+            self.buffer.pop()  # Remove the last character from the buffer
+            return True
 
     def _handle_tab(self, args: InputConfigsPacket):
         """
-        Handles the tab key press event to either complete the current input or insert spaces.
+        Handles the tab key for autocompletion or inserts spaces if no completion is available.
 
         Args:
-            args (InputConfigsPacket): Contains the input configuration settings, including the buffer, indentation level, 
-                                    end character, allow_empty_input flag, and the key pressed.
+            args (InputConfigsPacket): The input configuration packet.
 
         Returns:
-            bool: Returns False to indicate that the input handling should continue.
+            bool: False to continue input.
         """
         if self.completion.content:
-            print(self.completion.content, end='', flush=True)  # Show completion
+            print(self.completion.content, end='', flush=True)  # Show the completion
             self.buffer.extend(self.completion.content)  # Append the completion to the buffer
-            return False
         else:
-            print(" " * args.indent, end='', flush=True)  # Print spaces if no completion
-            return False
+            print(" " * args.indent, end='', flush=True)  # Insert spaces if no completion
+        return False
 
     def _handle_regular(self, args: InputConfigsPacket):
-        """Handles regular input characters.
+        """
+        Handles regular alphanumeric characters during input.
 
         Args:
-            args (InputConfigsPacket): The input configuration packet with the input character.
+            args (InputConfigsPacket): The input configuration packet.
 
         Returns:
-            bool: True if the input has changed, False otherwise.
+            bool: True if the input changed.
         """
         self.buffer.append(args.key)
         print(f"{args.key}", end='', flush=True)
-        return True  # Indicate input has changed
+        return True
 
-if __name__ == "__main__":
-    def call_to_example(s: str) -> str:
-        """Auto-completion function that returns the remaining part of the best matching word based on user input.
-
-        Args:
-            s (str): The current input string.
+    def get_cursor_position(self):
+        """
+        Retrieves the current cursor position in the console.
 
         Returns:
-            str: The remaining part of the completed string or an empty string if no match is found.
+            tuple: A tuple containing the current row and column of the cursor.
         """
-        choices = ["apple", "apricot", "banana", "blueberry", "blackberry", "orange"]
-        
-        s = s.split(' ')[::-1][0] # Gets the last word in the buffer
-        for choice in choices:
-            if choice.startswith(s):
-                return choice[len(s):]  # Return the remaining part of the string
-        
-        return ""  # Return an empty string if no match is found
+        import termios, tty
+        from sys import stdin
+        fd = stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
 
-    session = DynamicInput()
-    answer = session.input("cooltest> ", call_to=call_to_example)
-    print(f"\nAnswer: {answer}")
+        try:
+            tty.setraw(stdin.fileno())
+            stdout.write("\033[6n")
+            stdout.flush()
+
+            response = ""
+            while True:
+                ch = stdin.read(1)
+                response += ch
+                if ch == "R":
+                    break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+        # Extract the row and column from the response
+        response = response.lstrip("\033[")
+        rows, cols = map(int, response[:-1].split(";"))
+
+        return rows, cols
+
+    def _edit(self, returnRange: int, text: str):
+        """
+        Edits a portion of the current input buffer and replaces it with new text.
+
+        Args:
+            returnRange (int): The number of characters to move back and edit.
+            text (str): The new text to insert into the buffer.
+        """
+        self._hideCursor()
+
+        stdout.write(f"\x1b[{returnRange}D\x1b[K")  # Move back and clear
+        stdout.flush()
+
+        self.buffer = self.buffer[returnRange:]  # Remove characters from buffer
+
+        print(text, end='', flush=True)
+        self.buffer += list(text)  # Append new text to buffer
+
+        self._showCursor()
+
+    def edit(self, returnRange: int, new_text: str) -> None:
+        """
+        Public method to trigger the edit operation.
+
+        Args:
+            returnRange (int): The number of characters to move back.
+            new_text (str): The text to replace the existing input with.
+
+        Raises:
+            ValueError: If new_text is empty.
+        """
+        if not new_text:
+            raise ValueError("Cannot edit with an empty string.")
+
+        Thread(target=self._edit, args=(returnRange, new_text)).start()
