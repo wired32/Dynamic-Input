@@ -1,4 +1,4 @@
-from dynamicio import DynamicInput
+from src.dynamicio import DynamicInput
 
 # In this example you will have an idea on how to use binds and raw_calls
 #   In overalls, basically binds are special keys (ASCII) that are optional and can be used to trigger a call without time buffing
@@ -15,7 +15,8 @@ class RTDynamicReplacing:
 
     def check(self, text: str) -> None:
         """Replaces specific keywords in the input text with designated values."""
-        original_text = text  # Snapshot of the original text
+        snapshot = self.session.snapshot() # Snapshot of the cursor position
+        original_text = text  # Snapshot of the original text 
         
         # Use dictionary to apply all replacements
         for key, value in self.replacements.items():
@@ -27,7 +28,7 @@ class RTDynamicReplacing:
         # This will delete a specific amount of characters in the input and print the new text
         #   This also automatically updates the input buffer
         #   in case of customization, you can directly manipulate self.session.buffer
-        self.session.edit(returnRange=len(original_text), new_text=text)
+        self.session.edit(returnRange=len(original_text), new_text=text, cache=snapshot)
 
     def realtime_check(self, prompt: str = None) -> str:
         """Configures the input settings for real-time checking."""
@@ -38,8 +39,9 @@ class RTDynamicReplacing:
         self.session.input(
             prompt, 
             config_bind=" ", 
-            call_to=self.check, 
-            raw_call=True
+            call_to=self.check,
+            inactivity_trigger=False,
+            output_bind=True
         )
 
 if __name__ == "__main__":

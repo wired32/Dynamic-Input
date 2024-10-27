@@ -11,3 +11,7 @@ class InputConfigsPacket:
         self.indent = indent
         self.allow_empty_input = allow_empty_input
         self.key = key
+
+class SnapshotCache:
+    def __init__(self, cursor_coords: list):
+        self.coords = cursor_coords

@@ -4,7 +4,7 @@ import msvcrt
 from time import time as timestamp
 from typing import Callable, Optional
 from threading import Thread
-from .packets import CompletionPacket, InputConfigsPacket
+from .packets import CompletionPacket, InputConfigsPacket, SnapshotCache
 from sys import stdout
 
 from .utils.cursor import _hideCursor, _showCursor
@@ -101,7 +101,13 @@ class DynamicInput:
 
             if msvcrt.kbhit():
                 delay_buffer.append(difference) # Add delay to buffer
-                key = msvcrt.getch().decode('utf-8')
+                try: 
+                    key = msvcrt.getch().decode('utf-8')
+                except UnicodeDecodeError: 
+                    try: 
+                        key = msvcrt.getwch()
+                    except:
+                        continue
 
                 # Handle key bound to config_bind
                 if key == config_bind and autocomplete and call_to is not None:
@@ -112,10 +118,10 @@ class DynamicInput:
                     Thread(target=self._process_completion, args=(self.buffer, shade, call_to)).start()
                     ts = cts
                     continue
-                elif key == config_bind and not autocomplete and call_to is None:
+                elif key == config_bind and not autocomplete and call_to is not None:
                     if output_bind:
+                        print(key, end='', flush=True)
                         self.buffer.append(key)
-                        print(key, end='')
                     Thread(target=call_to, args=(''.join(self.buffer),)).start()
                     ts = cts
                     continue
@@ -215,32 +221,41 @@ class DynamicInput:
         Returns:
             tuple: A tuple containing the current row and column of the cursor.
         """
-        import termios, tty
-        from sys import stdin
-        fd = stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
+        # Use ctypes to access Windows API for cursor position
+        import ctypes
+        from ctypes import wintypes
 
-        try:
-            tty.setraw(stdin.fileno())
-            stdout.write("\033[6n")
-            stdout.flush()
+        class COORD(ctypes.Structure):
+            _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
 
-            response = ""
-            while True:
-                ch = stdin.read(1)
-                response += ch
-                if ch == "R":
-                    break
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", COORD),
+                ("dwCursorPosition", COORD),
+                ("wAttributes", ctypes.c_short),
+                ("srWindow", wintypes.RECT),
+                ("dwMaximumWindowSize", COORD),
+            ]
 
-        # Extract the row and column from the response
-        response = response.lstrip("\033[")
-        rows, cols = map(int, response[:-1].split(";"))
+        kernel32 = ctypes.windll.kernel32
+        hConsole = kernel32.GetStdHandle(-11)  # -11 = STD_OUTPUT_HANDLE
 
-        return rows, cols
+        csbi = CONSOLE_SCREEN_BUFFER_INFO()
+        kernel32.GetConsoleScreenBufferInfo(hConsole, ctypes.byref(csbi))
 
-    def _edit(self, returnRange: int, text: str):
+        # Get cursor position from the structure
+        cursor_x = csbi.dwCursorPosition.X
+        cursor_y = csbi.dwCursorPosition.Y
+
+        # In Windows, cursor position is 0-based.
+        return (cursor_y + 1, cursor_x + 1)    # Convert to 1-based indexing
+    
+    def snapshot(self) -> SnapshotCache:
+        cache = SnapshotCache(self.get_cursor_position())
+
+        return cache
+
+    def _edit(self, returnRange: int, text: str, cache: SnapshotCache) -> None:
         """
         Edits a portion of the current input buffer and replaces it with new text.
 
@@ -249,6 +264,10 @@ class DynamicInput:
             text (str): The new text to insert into the buffer.
         """
         self._hideCursor()
+
+        x, y = cache.coords
+        stdout.write(f"\033[{x};{y}H") # Move cursor to saved position
+        stdout.flush()
 
         stdout.write(f"\x1b[{returnRange}D\x1b[K")  # Move back and clear
         stdout.flush()
@@ -260,7 +279,7 @@ class DynamicInput:
 
         self._showCursor()
 
-    def edit(self, returnRange: int, new_text: str) -> None:
+    def edit(self, returnRange: int, new_text: str, cache: SnapshotCache) -> None:
         """
         Public method to trigger the edit operation.
 
@@ -274,7 +293,7 @@ class DynamicInput:
         if not new_text:
             raise ValueError("Cannot edit with an empty string.")
 
-        Thread(target=self._edit, args=(returnRange, new_text)).start()
+        Thread(target=self._edit, args=(returnRange, new_text, cache)).start()
 
 def input(prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n', raw_call: bool = False, inactivity_trigger: bool = True) -> str:
     """
