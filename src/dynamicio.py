@@ -4,8 +4,10 @@ import msvcrt
 from time import time as timestamp
 from typing import Callable, Optional
 from threading import Thread
-from packets import CompletionPacket, InputConfigsPacket
+from .packets import CompletionPacket, InputConfigsPacket
 from sys import stdout
+
+from .utils.cursor import _hideCursor, _showCursor
 
 class DynamicInput:
     """A class that adds flexibility to user input"""
@@ -32,38 +34,11 @@ class DynamicInput:
 
     def _hideCursor(self) -> None:
         """Hides the cursor in the console."""
-        stdout.write("\033[?25l")
-        stdout.flush()
+        _hideCursor()
 
     def _showCursor(self) -> None:
         """Shows the cursor in the console."""
-        stdout.write("\033[?25h")
-        stdout.flush()
-
-    def complete(self, s: CompletionPacket) -> None:
-        """
-        Displays the autocompletion suggestion on the console.
-
-        Args:
-            s (CompletionPacket): The packet containing the completion string to display.
-        """
-        if len(self.buffer) > s.bufferlenght:
-            return  # If the buffer length has changed, abort to avoid glitches.
-
-        from rich import print
-        stdout.write("\033[s")  # Save cursor position
-        stdout.write("\033[K")  # Clear the line
-        stdout.flush()
-
-        self._hideCursor()  # Hide cursor for smoother changes
-
-        # Print the completion content using rich colors
-        print(f"[{s.shade}]{s.content}", end='', flush=True)
-
-        stdout.write("\033[u")  # Restore cursor position
-        stdout.flush()
-
-        self._showCursor()  # Show the cursor again
+        _showCursor()
 
     def _process_completion(self, buffer: list, shade: str, call_to: Optional[Callable[[str], str]] = None) -> None:
         """
@@ -82,37 +57,25 @@ class DynamicInput:
         self.completion = CompletionPacket(call_to(''.join(buffer)), shade, len(buffer))
 
         if not self.exit:
-            self.complete(self.completion)
+            from .utils.completer import complete
+            complete(self.completion, self.buffer)
         self.fetchInProgress = False
 
     def input(self, prompt: str = None, call_to: Optional[Callable[[str], str]] = None, end: str = '\n',
-              allow_empty_input: bool = True, shade: str = 'grey30', time_buffer: float = 0.5,
-              indent: int = 4, config_bind: str = None, raw_call: bool = False, output_bind: bool = True, inactivity_trigger: bool = True) -> str:
-        """
-        Receives input from the user, supporting autocompletion and key handlers.
-
-        Args:
-            prompt (str, optional): The string prompt shown to the user before input.
-            call_to (Callable[[str], str], optional): The function to call for the autocompletion logic.
-            end (str, optional): The character to print after the input. Default is newline.
-            allow_empty_input (bool, optional): If False, prevents submitting an empty input. Default is True.
-            shade (str, optional): The color shade for autocompletion. Uses rich color codes. Default is 'grey30'.
-            time_buffer (float, optional): Time in seconds before fetching autocompletion after typing. Default is 0.5 seconds.
-            indent (int, optional): The number of spaces inserted for indentation when no completion is available.
-            config_bind (str, optional): A keybind for triggering the autocompletion logic on certain keys.
-            raw_call (bool, optional): If True, the call_to function is triggered immediately without autocompletion display. Default is False.
-            output_bind (bool, optional): If True, the bound key is shown in the output buffer. Default is True.
-            inactivity_trigger (bool, optional): If True, the call logic is triggered when the user is inactive for a certain amount of time. Defaults to True
-
-        Returns:
-            str: The final input string after the user presses enter.
-        """
-        from rich import print
+              allow_empty_input: bool = True, shade: str = 'grey30',
+              indent: int = 4, config_bind: str = None, autocomplete: bool = False, 
+              output_bind: bool = True,
+              inactivity_trigger: bool = True, monitor_delay: int = None) -> str:
+        
+        if monitor_delay is not None:
+            import time
 
         ts = timestamp()
         called = False
         self.exit = False # Reset the exit flag
-        self.buffer = []
+        delay_buffer = [] # Initialize delay buffer
+        self.buffer = []  # Initialize input buffer
+        time_buffer = 0
 
         # Ensure a single character is bound if config_bind is provided
         if config_bind is not None and len(config_bind) > 1:
@@ -121,23 +84,27 @@ class DynamicInput:
         # Display the prompt
         if prompt is not None:
             print(prompt, end='', flush=True)
+        
 
         while True:
             cts = timestamp()
+            difference = cts - ts
 
-            # Check if enough time has passed for autocompletion
-            if cts - ts > time_buffer and called and inactivity_trigger and call_to is not None:
-                if raw_call:
-                    Thread(target=call_to, args=(''.join(self.buffer),)).start()
-                else:
+            if len(delay_buffer) > 5 and called and call_to is not None and inactivity_trigger and difference > time_buffer:
+                time_buffer = sum(delay_buffer) / len(delay_buffer) # Get average delay
+
+                if autocomplete:
                     Thread(target=self._process_completion, args=(self.buffer, shade, call_to)).start()
+                else:
+                    Thread(target=call_to, args=(''.join(self.buffer),)).start()
                 called = False
 
             if msvcrt.kbhit():
+                delay_buffer.append(difference) # Add delay to buffer
                 key = msvcrt.getch().decode('utf-8')
 
                 # Handle key bound to config_bind
-                if key == config_bind and not raw_call and call_to is not None:
+                if key == config_bind and autocomplete and call_to is not None:
                     if output_bind:
                         self.buffer.append(key)
                         print(key, end='', flush=True)
@@ -145,7 +112,7 @@ class DynamicInput:
                     Thread(target=self._process_completion, args=(self.buffer, shade, call_to)).start()
                     ts = cts
                     continue
-                elif key == config_bind and raw_call:
+                elif key == config_bind and not autocomplete and call_to is None:
                     if output_bind:
                         self.buffer.append(key)
                         print(key, end='')
@@ -167,6 +134,9 @@ class DynamicInput:
                     called = self._handle_regular(InputConfigsPacket(key=key))
 
                 ts = cts
+
+            if monitor_delay is not None:
+                time.sleep(monitor_delay)
 
         return ''.join(self.buffer)
 
@@ -190,7 +160,7 @@ class DynamicInput:
         print(end=args.end)
         return 'EXIT'
 
-    def _handle_backspace(self, args: InputConfigsPacket) -> bool:
+    def _handle_backspace(self, args: InputConfigsPacket = None) -> bool:
         """
         Handles the backspace key to remove the last character in the input.
 
@@ -219,6 +189,7 @@ class DynamicInput:
         if self.completion.content:
             print(self.completion.content, end='', flush=True)  # Show the completion
             self.buffer.extend(self.completion.content)  # Append the completion to the buffer
+            self.completion.content = ''
         else:
             print(" " * args.indent, end='', flush=True)  # Insert spaces if no completion
         return False

@@ -1,4 +1,4 @@
-from dynamicio import DynamicInput
+from src.dynamicio import DynamicInput
 
 # In this example we will create a simple auto completer using DynamicInput.
 
@@ -27,13 +27,13 @@ if __name__ == '__main__':
     # Quick example using lambda
     # Start and set the input configurations
     ex1 = session.input(
-        prompt="Enter your name: ", # Prompt that will be used, works the same way as input("Enter your name: ")
+        prompt="Enter something: ", # Prompt that will be used, works the same way as input("Enter your name: ")
         call_to=lambda x: f"current text: {x}", # Simple lambda that will show us how the auto completion works
         end="\n", # Let's set an end (defaults as \n, this is useful if you dont want a newline after sending the input)
-        time_buffer=0.5, # Time in seconds before fetching autocompletion, defaults to 0.5
         indent=4, # Number of spaces that 'tab' key will add to the input if no completion is avaliable, set as 0 to disable, defaults as 4
         allow_empty_input=False, # If False, blocks the enter key if the input is empty, defaults to False
         shade="grey30", # Color shade for the autocompletion, defaults to grey30 (this uses rich standart colors)
+        autocomplete=True
     )
 
     # Observation: most of these arguments are not required, but they are good to know in case you want customization.
@@ -43,8 +43,9 @@ if __name__ == '__main__':
     # Example using the simple auto completer we made
     # Same thing as the last example but with our function and only using required parameters:
     ex2 = session.input(
-        prompt="Enter your name: ",
+        prompt="Enter something: ",
         call_to=call_to_example, # Call to function
+        autocomplete=True
     )
 
     print(ex2) # Printing the final input

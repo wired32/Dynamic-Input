@@ -2,7 +2,8 @@
 # Note that this is still limited for easier use, for better customization utilize DynamicInput.
 
 # Import input function
-from dynamicio import input
+from src.dynamicio import input
+
 
 # Standart input
 ex1 = input("Enter something: ")
@@ -11,14 +12,14 @@ print(ex1 + '\n')
 # Simple autocompletion example
 ex2 = input(
     "Enter something: ",
-    call_to=lambda x: x.upper()
+    call_to=lambda x: x.upper() # This is just an example, Feel free to use your own function here
 )
 print(ex2 + '\n')
 
 # Simple raw call example
 ex3 = input(
     "Enter something: ",
-    call_to=lambda x: print(f"\n{x.upper()}"),
+    call_to=lambda x: print(f"\n{x.upper()}"), # This is just an example, Feel free to use your own function here
     raw_call=True,
     inactivity_trigger=True
 )
