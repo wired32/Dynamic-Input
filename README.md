@@ -44,7 +44,7 @@ def call_to_example(s: str) -> str:
 
 # Create a DynamicInput session
 session = DynamicInput()
-answer = session.input("cooltest> ", call_to=call_to_example)
+answer = session.input("cooltest> ", call_to=call_to_example, autocomplete=True)
 print(f"\nAnswer: {answer}")
 ```
 
